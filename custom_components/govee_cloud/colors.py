@@ -21,8 +21,10 @@ RGB = tuple[int, int, int]
 # Web colours that look wrong on LEDs, mapped to what they look like in a
 # room: (bulb colour, brightness %). Keys are Home Assistant's values for
 # these colour names (homeassistant.util.color.COLORS).
-EARTH_TONES: dict[RGB, tuple[RGB, int]] = {
-    (165, 42, 42): ((255, 85, 10), 25),  # brown
+EARTH_TONES: dict[RGB, tuple[RGB, int | None]] = {
+    # brown: matched to Google Home, which shows "brown" as a warm orange
+    # (hue ~27 degrees) at the light's current brightness.
+    (165, 42, 42): ((255, 120, 20), None),
     (139, 69, 19): ((255, 80, 5), 18),  # saddlebrown ("dark brown")
     (160, 82, 45): ((255, 95, 20), 28),  # sienna
     (210, 105, 30): ((255, 110, 15), 45),  # chocolate

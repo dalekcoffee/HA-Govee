@@ -27,9 +27,11 @@ class Preset:
 
 # Calibrate these against how Google Home renders the same names.
 PRESETS: dict[str, Preset] = {
-    "dark brown": Preset(rgb=(255, 80, 5), brightness=18),
-    "brown": Preset(rgb=(255, 85, 10), brightness=25),
-    "light brown": Preset(rgb=(255, 120, 40), brightness=45),
+    # Google Home shows "brown" as a warm orange (hue ~27 degrees) without
+    # changing brightness; "dark brown" is the same hue, dimmed.
+    "dark brown": Preset(rgb=(255, 105, 10), brightness=25),
+    "brown": Preset(rgb=(255, 120, 20)),
+    "light brown": Preset(rgb=(255, 140, 50)),
     "amber": Preset(rgb=(255, 126, 0)),
     "candlelight": Preset(kelvin=2000, brightness=30),
     "candle light": Preset(kelvin=2000, brightness=30),

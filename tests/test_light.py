@@ -97,7 +97,10 @@ async def test_turn_on_color_temp_clamped(hass, aioclient_mock):
         {ATTR_ENTITY_ID: ENTITY, ATTR_COLOR_TEMP_KELVIN: 1500},
         blocking=True,
     )
-    assert _controls(aioclient_mock) == [("colorTemperatureK", 2000)]
+    assert _controls(aioclient_mock) == [
+        ("powerSwitch", 1),
+        ("colorTemperatureK", 2000),
+    ]
 
 
 async def test_turn_off(hass, aioclient_mock):
@@ -118,3 +121,22 @@ async def test_auth_failure_starts_reauth(hass, aioclient_mock):
     assert not await hass.config_entries.async_setup(entry.entry_id)
     flows = hass.config_entries.flow.async_progress()
     assert any(f["context"]["source"] == "reauth" for f in flows)
+
+
+async def test_turn_on_sends_power_even_if_cached_on(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock, power=1)
+    await hass.services.async_call(
+        LIGHT_DOMAIN, "turn_on", {ATTR_ENTITY_ID: ENTITY}, blocking=True
+    )
+    assert _controls(aioclient_mock) == [("powerSwitch", 1)]
+
+
+async def test_rate_limit_stops_polling(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{BASE}/user/devices", json=DEVICES)
+    aioclient_mock.post(f"{BASE}/device/state", status=429, json={})
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(ENTITY).state == STATE_UNAVAILABLE

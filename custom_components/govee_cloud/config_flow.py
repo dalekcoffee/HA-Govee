@@ -106,16 +106,23 @@ class GoveeCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             api_key = user_input[CONF_API_KEY].strip()
+            entry = self._get_reauth_entry()
             try:
-                await _fetch_lights(self, api_key)
+                lights = await _fetch_lights(self, api_key)
             except GoveeAuthError:
                 errors["base"] = "invalid_auth"
             except GoveeApiError:
                 errors["base"] = "cannot_connect"
             else:
-                return self.async_update_reload_and_abort(
-                    self._get_reauth_entry(), data_updates={CONF_API_KEY: api_key}
+                selected = set(
+                    entry.options.get(CONF_DEVICES, entry.data.get(CONF_DEVICES, []))
                 )
+                if selected and not selected & {d.device_id for d in lights}:
+                    errors["base"] = "wrong_account"
+                else:
+                    return self.async_update_reload_and_abort(
+                        entry, data_updates={CONF_API_KEY: api_key}
+                    )
         return self.async_show_form(
             step_id="reauth_confirm",
             data_schema=vol.Schema({vol.Required(CONF_API_KEY): str}),

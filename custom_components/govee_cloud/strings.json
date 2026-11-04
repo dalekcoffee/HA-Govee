@@ -25,7 +25,8 @@
     },
     "error": {
       "invalid_auth": "Govee rejected this API key.",
-      "cannot_connect": "Could not reach the Govee API. Try again later."
+      "cannot_connect": "Could not reach the Govee API. Try again later.",
+      "wrong_account": "This key belongs to a Govee account without the lights you set up."
     },
     "abort": {
       "already_configured": "This API key is already set up.",

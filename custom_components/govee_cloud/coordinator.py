@@ -10,7 +10,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import GoveeApi, GoveeApiError, GoveeAuthError, GoveeDevice
+from .api import (
+    GoveeApi,
+    GoveeApiError,
+    GoveeAuthError,
+    GoveeDevice,
+    GoveeRateLimitError,
+)
 from .const import DOMAIN, SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,6 +46,7 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         )
         self.api = api
         self.devices = {device.device_id: device for device in devices}
+        self.options_snapshot: dict[str, Any] = {}
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         data: dict[str, dict[str, Any]] = {}
@@ -49,6 +56,10 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 data[device_id] = await self.api.get_state(device)
             except GoveeAuthError as err:
                 raise ConfigEntryAuthFailed(str(err)) from err
+            except GoveeRateLimitError as err:
+                # Stop polling the remaining devices so we don't use up
+                # more of the account's quota.
+                raise UpdateFailed(str(err)) from err
             except GoveeApiError as err:
                 errors.append(f"{device.name}: {err}")
                 # Leave this device out; its entity shows unavailable until
@@ -61,7 +72,8 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def apply_local_state(self, device_id: str, values: dict[str, Any]) -> None:
         """Store values we just sent so the UI updates before the next poll."""
-        if self.data is None:
+        # Skip devices whose last poll failed so they stay unavailable.
+        if self.data is None or device_id not in self.data:
             return
-        self.data.setdefault(device_id, {}).update(values)
+        self.data[device_id].update(values)
         self.async_update_listeners()

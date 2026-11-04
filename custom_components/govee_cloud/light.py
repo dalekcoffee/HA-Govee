@@ -162,11 +162,10 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on, optionally setting color or brightness."""
-        sent: dict[str, Any] = {}
-
-        if not self.is_on:
-            await self._send(CAP_ON_OFF, INST_POWER, 1)
-            sent[INST_POWER] = 1
+        # Always send power on: the cached state can be up to a minute old,
+        # so the bulb may already be off even if HA still shows it on.
+        await self._send(CAP_ON_OFF, INST_POWER, 1)
+        sent: dict[str, Any] = {INST_POWER: 1}
 
         if ATTR_RGB_COLOR in kwargs:
             red, green, blue = kwargs[ATTR_RGB_COLOR]
@@ -190,7 +189,6 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
             await self._send(CAP_RANGE, INST_BRIGHTNESS, value)
             sent[INST_BRIGHTNESS] = value
 
-        sent[INST_POWER] = 1
         self.coordinator.apply_local_state(self._device.device_id, sent)
 
     async def async_turn_off(self, **kwargs: Any) -> None:

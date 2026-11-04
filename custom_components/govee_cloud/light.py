@@ -33,10 +33,13 @@ from .const import (
     INST_RGB,
 )
 from .coordinator import GoveeConfigEntry, GoveeCoordinator
+from .throttle import CommandThrottle
 
 _LOGGER = logging.getLogger(__name__)
 
-PARALLEL_UPDATES = 1
+# Each light paces its own commands (see throttle.py), so HA does not need
+# to serialize service calls; serializing would also stop coalescing.
+PARALLEL_UPDATES = 0
 
 # Wait this long before retrying a command Govee rate-limited.
 RATE_LIMIT_RETRY_DELAY = 1.0
@@ -75,6 +78,7 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
         super().__init__(coordinator)
         self._device = device
         self._attr_unique_id = device.device_id
+        self._throttle = CommandThrottle(self._control)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device.device_id)},
             manufacturer="Govee",
@@ -159,18 +163,18 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
             return int(value)
         return None
 
-    async def _send(self, cap_type: str, instance: str, value: Any) -> None:
+    async def _control(self, cap_type: str, instance: str, value: Any) -> None:
         try:
-            try:
-                await self.coordinator.api.control(
-                    self._device, cap_type, instance, value
-                )
-            except GoveeRateLimitError:
-                # Commands to many lights at once can hit Govee's burst limit.
-                await asyncio.sleep(RATE_LIMIT_RETRY_DELAY)
-                await self.coordinator.api.control(
-                    self._device, cap_type, instance, value
-                )
+            await self.coordinator.api.control(self._device, cap_type, instance, value)
+        except GoveeRateLimitError:
+            # Back off once; Govee's limit is a short burst window.
+            await asyncio.sleep(RATE_LIMIT_RETRY_DELAY)
+            await self.coordinator.api.control(self._device, cap_type, instance, value)
+
+    async def _send(self, cap_type: str, instance: str, value: Any) -> Any:
+        """Send a command. Returns the value sent, or None if coalesced."""
+        try:
+            return await self._throttle.send(cap_type, instance, value)
         except GoveeApiError as err:
             _LOGGER.warning(
                 "Govee rejected %s=%s for %s (%s): %s",
@@ -186,23 +190,32 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on, optionally setting color or brightness."""
-        # Always send power on: the cached state can be up to a minute old,
-        # so the bulb may already be off even if HA still shows it on.
-        await self._send(CAP_ON_OFF, INST_POWER, 1)
+        # A plain "turn on" always sends power, since the cached state can be
+        # up to a minute old. When only changing color or brightness on a
+        # light we believe is on, skip it to halve the requests.
+        changes = {
+            ATTR_RGB_COLOR,
+            ATTR_COLOR_TEMP_KELVIN,
+            ATTR_BRIGHTNESS,
+        } & kwargs.keys()
+        if not changes or not self.is_on:
+            await self._send(CAP_ON_OFF, INST_POWER, 1)
         sent: dict[str, Any] = {INST_POWER: 1}
 
         if ATTR_RGB_COLOR in kwargs:
             red, green, blue = kwargs[ATTR_RGB_COLOR]
             value = (red << 16) | (green << 8) | blue
-            await self._send(CAP_COLOR, INST_RGB, value)
-            sent[INST_RGB] = value
-            sent[INST_COLOR_TEMP] = 0
+            if (sent_rgb := await self._send(CAP_COLOR, INST_RGB, value)) is not None:
+                sent[INST_RGB] = sent_rgb
+                sent[INST_COLOR_TEMP] = 0
         elif ATTR_COLOR_TEMP_KELVIN in kwargs:
             low = self._attr_min_color_temp_kelvin
             high = self._attr_max_color_temp_kelvin
             kelvin = max(low, min(high, int(kwargs[ATTR_COLOR_TEMP_KELVIN])))
-            await self._send(CAP_COLOR, INST_COLOR_TEMP, kelvin)
-            sent[INST_COLOR_TEMP] = kelvin
+            if (
+                sent_kelvin := await self._send(CAP_COLOR, INST_COLOR_TEMP, kelvin)
+            ) is not None:
+                sent[INST_COLOR_TEMP] = sent_kelvin
 
         if ATTR_BRIGHTNESS in kwargs and self._device.has(INST_BRIGHTNESS):
             low, high = self._brightness_range
@@ -210,8 +223,10 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
                 brightness_to_value(self._brightness_range, kwargs[ATTR_BRIGHTNESS])
             )
             value = max(low, min(high, value))
-            await self._send(CAP_RANGE, INST_BRIGHTNESS, value)
-            sent[INST_BRIGHTNESS] = value
+            if (
+                sent_level := await self._send(CAP_RANGE, INST_BRIGHTNESS, value)
+            ) is not None:
+                sent[INST_BRIGHTNESS] = sent_level
 
         self.coordinator.apply_local_state(self._device.device_id, sent)
 

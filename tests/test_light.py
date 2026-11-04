@@ -98,10 +98,7 @@ async def test_turn_on_color_temp_clamped(hass, aioclient_mock):
         {ATTR_ENTITY_ID: ENTITY, ATTR_COLOR_TEMP_KELVIN: 1500},
         blocking=True,
     )
-    assert _controls(aioclient_mock) == [
-        ("powerSwitch", 1),
-        ("colorTemperatureK", 2000),
-    ]
+    assert _controls(aioclient_mock) == [("colorTemperatureK", 2000)]
 
 
 async def test_turn_off(hass, aioclient_mock):

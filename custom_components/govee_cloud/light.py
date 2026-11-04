@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 from homeassistant.components.light import (
@@ -18,7 +20,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.color import brightness_to_value, value_to_brightness
 
-from .api import GoveeApiError, GoveeDevice
+from .api import GoveeApiError, GoveeDevice, GoveeRateLimitError
 from .const import (
     CAP_COLOR,
     CAP_ON_OFF,
@@ -32,7 +34,12 @@ from .const import (
 )
 from .coordinator import GoveeConfigEntry, GoveeCoordinator
 
+_LOGGER = logging.getLogger(__name__)
+
 PARALLEL_UPDATES = 1
+
+# Wait this long before retrying a command Govee rate-limited.
+RATE_LIMIT_RETRY_DELAY = 1.0
 
 
 async def async_setup_entry(
@@ -154,8 +161,25 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
 
     async def _send(self, cap_type: str, instance: str, value: Any) -> None:
         try:
-            await self.coordinator.api.control(self._device, cap_type, instance, value)
+            try:
+                await self.coordinator.api.control(
+                    self._device, cap_type, instance, value
+                )
+            except GoveeRateLimitError:
+                # Commands to many lights at once can hit Govee's burst limit.
+                await asyncio.sleep(RATE_LIMIT_RETRY_DELAY)
+                await self.coordinator.api.control(
+                    self._device, cap_type, instance, value
+                )
         except GoveeApiError as err:
+            _LOGGER.warning(
+                "Govee rejected %s=%s for %s (%s): %s",
+                instance,
+                value,
+                self._device.name,
+                self._device.sku,
+                err,
+            )
             raise HomeAssistantError(
                 f"Could not control {self._device.name}: {err}"
             ) from err

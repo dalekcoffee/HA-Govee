@@ -1,6 +1,7 @@
 """Light platform tests."""
 
 import asyncio
+import copy
 import json
 
 from homeassistant.components.light import (
@@ -18,6 +19,7 @@ from homeassistant.const import (
     STATE_ON,
     STATE_UNAVAILABLE,
 )
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.govee_cloud.api import GoveeRateLimitError
@@ -229,3 +231,29 @@ async def test_explicit_brightness_wins_over_color_darkness(hass, aioclient_mock
         blocking=True,
     )
     assert _controls(aioclient_mock)[-1] == ("brightness", 100)
+
+
+async def test_govee_app_group_is_skipped(hass, aioclient_mock):
+    """A group made in the Govee app is never set up, even if selected before."""
+    group_id = "GROUP-1234"
+    devices = copy.deepcopy(DEVICES)
+    group = copy.deepcopy(devices["data"][0])
+    group.update(sku="SameModeGroup", device=group_id, deviceName="Bonfire")
+    group.pop("type")
+    devices["data"].append(group)
+    aioclient_mock.get(f"{BASE}/user/devices", json=devices)
+    aioclient_mock.post(f"{BASE}/device/state", json=state())
+    aioclient_mock.post(f"{BASE}/device/control", json={"code": 200, "msg": "success"})
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_API_KEY: API_KEY, CONF_DEVICES: [DEVICE_ID, group_id]},
+    )
+    entry.add_to_hass(hass)
+    stale = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, group_id)}
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("light.bonfire") is None
+    assert dr.async_get(hass).async_get(stale.id) is None

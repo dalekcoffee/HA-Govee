@@ -9,16 +9,16 @@ def _hue_degrees(rgb):
     return colorsys.rgb_to_hsv(*(c / 255 for c in rgb))[0] * 360
 
 
-def test_brown_is_dim_warm_orange():
+def test_brown_matches_google_orange():
     bulb, brightness = adapt_rgb((165, 42, 42))
-    assert 15 <= _hue_degrees(bulb) <= 35  # orange, not red/pink
+    assert 20 <= _hue_degrees(bulb) <= 35  # orange, not red/pink
+    assert brightness is None  # keeps the current brightness, like Google
+
+
+def test_saddlebrown_is_dim_warm_orange():
+    bulb, brightness = adapt_rgb((139, 69, 19))
+    assert 10 <= _hue_degrees(bulb) <= 35
     assert brightness <= 30
-
-
-def test_saddlebrown_is_dimmer_than_brown():
-    _, brown = adapt_rgb((165, 42, 42))
-    _, dark = adapt_rgb((139, 69, 19))
-    assert dark < brown
 
 
 def test_full_intensity_colors_unchanged():

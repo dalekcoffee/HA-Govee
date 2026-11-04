@@ -207,7 +207,7 @@ async def test_newest_drag_value_wins(hass, aioclient_mock, monkeypatch):
     assert hass.states.get(ENTITY).attributes[ATTR_RGB_COLOR] == (0, 0, 255)
 
 
-async def test_brown_sends_warm_dim_color(hass, aioclient_mock):
+async def test_brown_sends_google_orange(hass, aioclient_mock):
     await _setup(hass, aioclient_mock)
     await hass.services.async_call(
         LIGHT_DOMAIN,
@@ -216,8 +216,7 @@ async def test_brown_sends_warm_dim_color(hass, aioclient_mock):
         blocking=True,
     )
     assert _controls(aioclient_mock) == [
-        ("colorRgb", (255 << 16) | (85 << 8) | 10),
-        ("brightness", 25),
+        ("colorRgb", (255 << 16) | (120 << 8) | 20),
     ]
 
 

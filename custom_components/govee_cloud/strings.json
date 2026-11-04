@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Govee API key",
+        "description": "In the Govee Home app, go to Settings and choose Apply for API Key. Govee emails the key to you.",
+        "data": {
+          "api_key": "API key"
+        }
+      },
+      "devices": {
+        "title": "Choose lights",
+        "description": "Pick the lights to control through the Govee cloud. Leave out lights you already control locally (for example with Govee lights local).",
+        "data": {
+          "devices": "Lights"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Govee API key rejected",
+        "description": "Govee no longer accepts the stored API key. Enter a new one.",
+        "data": {
+          "api_key": "API key"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Govee rejected this API key.",
+      "cannot_connect": "Could not reach the Govee API. Try again later."
+    },
+    "abort": {
+      "already_configured": "This API key is already set up.",
+      "no_lights": "No lights were found on this Govee account.",
+      "reauth_successful": "The API key was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Choose lights",
+        "data": {
+          "devices": "Lights"
+        }
+      }
+    },
+    "abort": {
+      "cannot_connect": "Could not reach the Govee API. Try again later."
+    }
+  }
+}

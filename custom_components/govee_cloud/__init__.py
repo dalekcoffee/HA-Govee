@@ -29,13 +29,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoveeConfigEntry) -> boo
     selected = set(entry.options.get(CONF_DEVICES, entry.data.get(CONF_DEVICES, [])))
     lights = [d for d in devices if d.is_light and d.device_id in selected]
 
-    # Remove devices the user has deselected so they don't linger.
+    # Remove devices the user has deselected (or that are no longer
+    # supported, like Govee app groups) so they don't linger.
+    kept = {d.device_id for d in lights} | {entry.entry_id}
     device_registry = dr.async_get(hass)
     for device_entry in dr.async_entries_for_config_entry(
         device_registry, entry.entry_id
     ):
         if not any(
-            domain == DOMAIN and ident in selected | {entry.entry_id}
+            domain == DOMAIN and ident in kept
             for domain, ident in device_entry.identifiers
         ):
             device_registry.async_update_device(

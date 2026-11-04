@@ -60,9 +60,19 @@ class GoveeDevice:
         return {}
 
     @property
+    def is_group(self) -> bool:
+        """Return True for a group of devices made in the Govee app."""
+        return self.sku.endswith("Group") or self.device_type is None
+
+    @property
     def is_light(self) -> bool:
-        """Return True if this device can be controlled as a light."""
-        if self.device_type is not None and self.device_type != TYPE_LIGHT:
+        """Return True if this device can be controlled as a light.
+
+        Groups made in the Govee app (sku "SameModeGroup", no type) are left
+        out: their state can't be read, and powering a group while its bulbs
+        are being set individually turns those bulbs off again.
+        """
+        if self.is_group or self.device_type != TYPE_LIGHT:
             return False
         return (CAP_ON_OFF, INST_POWER) in self.capabilities
 

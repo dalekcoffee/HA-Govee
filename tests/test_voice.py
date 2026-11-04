@@ -142,3 +142,28 @@ async def test_intent_requires_colour(hass, aioclient_mock):
         await intent.async_handle(
             hass, "test", "GoveeSetLightColor", {"area": {"value": "kitchen"}}
         )
+
+
+def _power_values(aioclient_mock, start=0):
+    values = []
+    for _method, url, data, _headers in aioclient_mock.mock_calls[start:]:
+        if str(url).endswith("/device/control"):
+            body = data if isinstance(data, dict) else json.loads(data)
+            cap = body["payload"]["capability"]
+            if cap["instance"] == "powerSwitch":
+                values.append(cap["value"])
+    return values
+
+
+@pytest.mark.parametrize("colour", ["brown", "dark brown", "candlelight", "red"])
+async def test_all_lights_colour_never_turns_off(hass, aioclient_mock, colour):
+    await _setup(hass, aioclient_mock)
+    start = len(aioclient_mock.mock_calls)
+    await conversation.async_converse(
+        hass, f"set all lights to {colour}", None, Context(), language="en"
+    )
+    await intent.async_handle(
+        hass, "test", "GoveeSetLightColor", {"color": {"value": colour}}
+    )
+    await hass.async_block_till_done()
+    assert 0 not in _power_values(aioclient_mock, start)

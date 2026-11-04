@@ -13,6 +13,7 @@ from homeassistant.components.light import (
     ColorMode,
     LightEntity,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -34,6 +35,7 @@ from .const import (
 )
 from .colors import adapt_rgb
 from .coordinator import GoveeConfigEntry, GoveeCoordinator
+from .palette import Preset
 from .throttle import CommandThrottle
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,9 +55,26 @@ async def async_setup_entry(
 ) -> None:
     """Set up Govee lights from a config entry."""
     coordinator = entry.runtime_data
-    async_add_entities(
+    lights = [
         GoveeLight(coordinator, device) for device in coordinator.devices.values()
-    )
+    ]
+    coordinator.lights = lights
+    entities: list[LightEntity] = list(lights)
+    if len(lights) > 1:
+        entities.append(GoveeAllLights(coordinator, entry, lights))
+    async_add_entities(entities)
+
+
+def preset_kwargs(preset: Preset) -> dict[str, Any]:
+    """Turn a colour preset into light.turn_on arguments."""
+    kwargs: dict[str, Any] = {}
+    if preset.rgb is not None:
+        kwargs[ATTR_RGB_COLOR] = preset.rgb
+    elif preset.kelvin is not None:
+        kwargs[ATTR_COLOR_TEMP_KELVIN] = preset.kelvin
+    if preset.brightness is not None:
+        kwargs[ATTR_BRIGHTNESS] = round(preset.brightness * 255 / 100)
+    return kwargs
 
 
 def _range(
@@ -247,3 +266,70 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
         """Turn the light off."""
         self.coordinator.apply_local_state(self._device.device_id, {INST_POWER: 0})
         await self._send(CAP_ON_OFF, INST_POWER, 0)
+
+
+class GoveeAllLights(CoordinatorEntity[GoveeCoordinator], LightEntity):
+    """Every selected Govee light as one entity, for "all lights" commands."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "all_lights"
+    _attr_color_mode = ColorMode.RGB
+
+    def __init__(
+        self,
+        coordinator: GoveeCoordinator,
+        entry: ConfigEntry,
+        members: list[GoveeLight],
+    ) -> None:
+        """Initialize the group."""
+        super().__init__(coordinator)
+        self._members = members
+        self._attr_unique_id = f"{entry.entry_id}_all_lights"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            manufacturer="Govee",
+            name="Govee Cloud",
+        )
+        modes: set[ColorMode] = set()
+        for member in members:
+            modes |= member.supported_color_modes or set()
+        self._attr_supported_color_modes = {
+            m for m in modes if m in (ColorMode.RGB, ColorMode.COLOR_TEMP)
+        } or {ColorMode.BRIGHTNESS}
+        if ColorMode.RGB not in self._attr_supported_color_modes:
+            self._attr_color_mode = next(iter(self._attr_supported_color_modes))
+        self._attr_min_color_temp_kelvin = min(m.min_color_temp_kelvin for m in members)
+        self._attr_max_color_temp_kelvin = max(m.max_color_temp_kelvin for m in members)
+
+    @property
+    def available(self) -> bool:
+        """Available while any member is."""
+        return any(m.available for m in self._members)
+
+    @property
+    def is_on(self) -> bool | None:
+        """On if any member is on."""
+        states = [m.is_on for m in self._members if m.available]
+        return any(states) if states else None
+
+    @property
+    def brightness(self) -> int | None:
+        """Brightness of the brightest member that is on."""
+        levels = [m.brightness for m in self._members if m.is_on and m.brightness]
+        return max(levels) if levels else None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn every member on with the same settings."""
+        await self._run(m.async_turn_on(**kwargs) for m in self._members)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn every member off."""
+        await self._run(m.async_turn_off(**kwargs) for m in self._members)
+
+    async def _run(self, calls) -> None:
+        results = await asyncio.gather(*calls, return_exceptions=True)
+        failed = [r for r in results if isinstance(r, Exception)]
+        if failed and len(failed) == len(results):
+            raise HomeAssistantError(str(failed[0]))
+        for err in failed:
+            _LOGGER.warning("A Govee light did not respond: %s", err)

@@ -11,6 +11,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import GoveeApi, GoveeApiError, GoveeAuthError
 from .const import CONF_DEVICES, DOMAIN
 from .coordinator import GoveeConfigEntry, GoveeCoordinator
+from .voice import async_setup_voice
 
 PLATFORMS: list[Platform] = [Platform.LIGHT]
 
@@ -34,7 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoveeConfigEntry) -> boo
         device_registry, entry.entry_id
     ):
         if not any(
-            domain == DOMAIN and ident in selected
+            domain == DOMAIN and ident in selected | {entry.entry_id}
             for domain, ident in device_entry.identifiers
         ):
             device_registry.async_update_device(
@@ -48,6 +49,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoveeConfigEntry) -> boo
 
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(async_setup_voice(hass))
     return True
 
 

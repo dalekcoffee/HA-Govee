@@ -38,6 +38,19 @@ You won't get update notifications this way.
 - **Lights with LAN Control:** keep using the built-in **Govee lights local** integration for those, and leave them unticked here.
 - **Internet:** it needs internet access and Govee's cloud to be up.
 
+## Voice control
+
+With 2 or more lights, the integration also adds:
+
+- **An "All lights" entity.** It controls every selected light at once.
+- **Colour names that work like Google Home.** Names such as *dark brown*, *brown*, *candlelight*, *warm white* and *daylight* each come with a sensible colour and brightness.
+- **Commands that run locally, without your AI agent.** HA handles these on its own, with no LLM tokens used:
+  - "set all lights to dark brown"
+  - "make every light warm white"
+  - "set the kitchen lights to candlelight"
+
+  To use these, turn on **Prefer handling commands locally** in your voice assistant's settings. Any other request still goes to your agent, which can use the same colour names.
+
 ## Privacy
 
 - **Where it connects:** the only server it talks to is `openapi.api.govee.com`.

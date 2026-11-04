@@ -18,8 +18,6 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.helpers import (
@@ -30,6 +28,7 @@ from homeassistant.helpers import (
     intent,
 )
 
+from .compat import vol
 from .const import DOMAIN
 from .light import preset_kwargs
 from .palette import Preset, normalize, resolve, spoken_names
@@ -173,26 +172,34 @@ def async_setup_voice(hass: HomeAssistant) -> CALLBACK_TYPE:
     intent.async_register(hass, SetColorIntent())
     unregister_trigger: CALLBACK_TYPE | None = None
     try:
-        # Not a public API, but it's how conversation triggers register their
-        # sentences. If it changes, the intent still works through Assist.
-        from homeassistant.components.conversation.agent_manager import (
-            get_agent_manager,
-        )
-        from homeassistant.components.conversation.trigger import (
-            TriggerDetails,
-        )
-
-        unregister_trigger = get_agent_manager(hass).register_trigger(
-            TriggerDetails(_sentences(), _make_sentence_handler(hass))
-        )
-    except Exception:  # noqa: BLE001
+        unregister_trigger = _register_sentences(hass)
+    except Exception:
         _LOGGER.warning(
             "Could not register local voice sentences; colour commands will "
-            "still work through your conversation agent"
+            "still work through your conversation agent",
+            exc_info=True,
         )
 
     hass.data[DATA_VOICE] = {"users": 1, "unregister": unregister_trigger}
     return lambda: _release(hass)
+
+
+def _register_sentences(hass: HomeAssistant) -> CALLBACK_TYPE:
+    # Not a public API, but it's how conversation triggers register their
+    # sentences. If it changes, the intent still works through Assist.
+    from homeassistant.components.conversation.agent_manager import (
+        get_agent_manager,
+    )
+
+    manager = get_agent_manager(hass)
+    handler = _make_sentence_handler(hass)
+    try:
+        # Home Assistant 2025.x
+        from homeassistant.components.conversation.trigger import TriggerDetails
+    except ImportError:
+        # Home Assistant 2026.10 and later
+        return manager.register_trigger(_sentences(), handler)
+    return manager.register_trigger(TriggerDetails(_sentences(), handler))
 
 
 def _release(hass: HomeAssistant) -> None:

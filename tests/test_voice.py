@@ -2,10 +2,17 @@
 
 import json
 
+import pytest
+
 from homeassistant.components import conversation
 from homeassistant.const import CONF_API_KEY
 from homeassistant.core import Context
-from homeassistant.helpers import area_registry as ar, entity_registry as er, intent
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+    intent,
+)
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -79,10 +86,15 @@ async def test_intent_dark_brown_all(hass, aioclient_mock):
     assert (DEVICE_2, "brightness") in sent
 
 
+def _put_in_area(hass, entity_id, area_id):
+    entry = er.async_get(hass).async_get(entity_id)
+    dr.async_get(hass).async_update_device(entry.device_id, area_id=area_id)
+
+
 async def test_intent_area(hass, aioclient_mock):
     await _setup(hass, aioclient_mock)
     kitchen = ar.async_get(hass).async_create("Kitchen")
-    er.async_get(hass).async_update_entity("light.kitchen_bulb", area_id=kitchen.id)
+    _put_in_area(hass, "light.kitchen_bulb", kitchen.id)
     start = len(aioclient_mock.mock_calls)
     await intent.async_handle(
         hass,
@@ -106,7 +118,7 @@ async def test_local_sentence(hass, aioclient_mock):
 async def test_local_sentence_room(hass, aioclient_mock):
     await _setup(hass, aioclient_mock)
     kitchen = ar.async_get(hass).async_create("Kitchen")
-    er.async_get(hass).async_update_entity("light.kitchen_bulb", area_id=kitchen.id)
+    _put_in_area(hass, "light.kitchen_bulb", kitchen.id)
     start = len(aioclient_mock.mock_calls)
     await conversation.async_converse(
         hass, "set the kitchen lights to brown", None, Context(), language="en"
@@ -121,3 +133,12 @@ async def test_unknown_colour_is_not_handled_locally(hass, aioclient_mock):
         hass, "set all lights to chartreuse sparkle", None, Context(), language="en"
     )
     assert _controls(aioclient_mock, start) == []
+
+
+async def test_intent_requires_colour(hass, aioclient_mock):
+    """The slot schema must work with this HA version's validation library."""
+    await _setup(hass, aioclient_mock)
+    with pytest.raises(intent.InvalidSlotInfo):
+        await intent.async_handle(
+            hass, "test", "GoveeSetLightColor", {"area": {"value": "kitchen"}}
+        )

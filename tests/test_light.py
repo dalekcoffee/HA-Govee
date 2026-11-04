@@ -19,6 +19,7 @@ from homeassistant.const import (
 )
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.govee_cloud.api import GoveeRateLimitError
 from custom_components.govee_cloud.const import CONF_DEVICES, DOMAIN
 
 from .common import API_KEY, BASE, DEVICE_ID, DEVICES, state
@@ -97,10 +98,7 @@ async def test_turn_on_color_temp_clamped(hass, aioclient_mock):
         {ATTR_ENTITY_ID: ENTITY, ATTR_COLOR_TEMP_KELVIN: 1500},
         blocking=True,
     )
-    assert _controls(aioclient_mock) == [
-        ("powerSwitch", 1),
-        ("colorTemperatureK", 2000),
-    ]
+    assert _controls(aioclient_mock) == [("colorTemperatureK", 2000)]
 
 
 async def test_turn_off(hass, aioclient_mock):
@@ -140,3 +138,22 @@ async def test_rate_limit_stops_polling(hass, aioclient_mock):
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert hass.states.get(ENTITY).state == STATE_UNAVAILABLE
+
+
+async def test_rate_limited_command_is_retried(hass, aioclient_mock, monkeypatch):
+    monkeypatch.setattr("custom_components.govee_cloud.light.RATE_LIMIT_RETRY_DELAY", 0)
+    entry = await _setup(hass, aioclient_mock)
+    api = entry.runtime_data.api
+    calls = []
+
+    async def flaky_control(device, cap_type, instance, value):
+        calls.append((instance, value))
+        if len(calls) == 1:
+            raise GoveeRateLimitError("429")
+
+    monkeypatch.setattr(api, "control", flaky_control)
+    await hass.services.async_call(
+        LIGHT_DOMAIN, "turn_off", {ATTR_ENTITY_ID: ENTITY}, blocking=True
+    )
+    assert calls == [("powerSwitch", 0), ("powerSwitch", 0)]
+    assert hass.states.get(ENTITY).state == STATE_OFF

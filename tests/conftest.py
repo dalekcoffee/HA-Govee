@@ -7,3 +7,9 @@ import pytest
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Load custom_components in every test."""
     return
+
+
+@pytest.fixture(autouse=True)
+def no_throttle_delay(monkeypatch):
+    """Don't pace commands in tests."""
+    monkeypatch.setattr("custom_components.govee_cloud.throttle.MIN_INTERVAL", 0)

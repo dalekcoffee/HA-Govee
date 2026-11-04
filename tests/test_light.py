@@ -195,7 +195,7 @@ async def test_newest_drag_value_wins(hass, aioclient_mock, monkeypatch):
                 blocking=True,
             )
         )
-        for rgb in ((1, 0, 0), (2, 0, 0), (3, 0, 0))
+        for rgb in ((255, 0, 0), (0, 255, 0), (0, 0, 255))
     ]
     await asyncio.sleep(0.05)
     release.set()
@@ -203,5 +203,30 @@ async def test_newest_drag_value_wins(hass, aioclient_mock, monkeypatch):
     await hass.async_block_till_done()
     # The first value went out, the middle one was merged away, and the
     # picker stays on the last value.
-    assert sent == [0x010000, 0x030000]
-    assert hass.states.get(ENTITY).attributes[ATTR_RGB_COLOR] == (3, 0, 0)
+    assert sent == [0xFF0000, 0x0000FF]
+    assert hass.states.get(ENTITY).attributes[ATTR_RGB_COLOR] == (0, 0, 255)
+
+
+async def test_brown_sends_warm_dim_color(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock)
+    await hass.services.async_call(
+        LIGHT_DOMAIN,
+        "turn_on",
+        {ATTR_ENTITY_ID: ENTITY, "color_name": "brown"},
+        blocking=True,
+    )
+    assert _controls(aioclient_mock) == [
+        ("colorRgb", (255 << 16) | (85 << 8) | 10),
+        ("brightness", 25),
+    ]
+
+
+async def test_explicit_brightness_wins_over_color_darkness(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock)
+    await hass.services.async_call(
+        LIGHT_DOMAIN,
+        "turn_on",
+        {ATTR_ENTITY_ID: ENTITY, "color_name": "brown", ATTR_BRIGHTNESS: 255},
+        blocking=True,
+    )
+    assert _controls(aioclient_mock)[-1] == ("brightness", 100)

@@ -32,6 +32,7 @@ from .const import (
     INST_POWER,
     INST_RGB,
 )
+from .colors import adapt_rgb
 from .coordinator import GoveeConfigEntry, GoveeCoordinator
 from .throttle import CommandThrottle
 
@@ -204,8 +205,13 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
             commands.append((CAP_ON_OFF, INST_POWER, 1))
         shown: dict[str, Any] = {INST_POWER: 1}
 
+        color_brightness: int | None = None
         if ATTR_RGB_COLOR in kwargs:
-            red, green, blue = kwargs[ATTR_RGB_COLOR]
+            # Dark colours (like brown) become a full-intensity hue plus a
+            # lower brightness, which is how they actually look on a bulb.
+            (red, green, blue), color_brightness = adapt_rgb(
+                tuple(kwargs[ATTR_RGB_COLOR])
+            )
             value = (red << 16) | (green << 8) | blue
             commands.append((CAP_COLOR, INST_RGB, value))
             shown[INST_RGB] = value
@@ -217,12 +223,16 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
             commands.append((CAP_COLOR, INST_COLOR_TEMP, kelvin))
             shown[INST_COLOR_TEMP] = kelvin
 
-        if ATTR_BRIGHTNESS in kwargs and self._device.has(INST_BRIGHTNESS):
+        level: float | None = None
+        if ATTR_BRIGHTNESS in kwargs:
+            level = brightness_to_value(self._brightness_range, kwargs[ATTR_BRIGHTNESS])
+        elif color_brightness is not None:
+            # Brightness implied by a dark colour, as a 0-100 percentage.
             low, high = self._brightness_range
-            value = round(
-                brightness_to_value(self._brightness_range, kwargs[ATTR_BRIGHTNESS])
-            )
-            value = max(low, min(high, value))
+            level = low + (high - low) * (color_brightness - 1) / 99
+        if level is not None and self._device.has(INST_BRIGHTNESS):
+            low, high = self._brightness_range
+            value = max(low, min(high, round(level)))
             commands.append((CAP_RANGE, INST_BRIGHTNESS, value))
             shown[INST_BRIGHTNESS] = value
 

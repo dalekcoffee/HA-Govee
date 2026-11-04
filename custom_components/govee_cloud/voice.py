@@ -117,6 +117,7 @@ class SetColorIntent(intent.IntentHandler):
         color = slots["color"]["value"]
         area = slots.get("area", {}).get("value")
         preset = resolve(color)
+        _LOGGER.debug("Colour intent: color=%r area=%r -> %s", color, area, preset)
         if preset is None:
             raise intent.IntentHandleError(f"I don't know the colour {color}")
         lights = find_lights(intent_obj.hass, area)
@@ -154,6 +155,13 @@ def _make_sentence_handler(hass: HomeAssistant):
             return None
         area_entity = result.entities.get("area")
         area = area_entity.text.strip() if area_entity else None
+        _LOGGER.debug(
+            "Local sentence %r: color=%r area=%r -> %s",
+            user_input.text,
+            color,
+            area,
+            preset,
+        )
         lights = find_lights(hass, area)
         if not lights:
             return f"I couldn't find any Govee lights in {area}"

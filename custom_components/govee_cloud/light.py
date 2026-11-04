@@ -77,6 +77,19 @@ def preset_kwargs(preset: Preset) -> dict[str, Any]:
     return kwargs
 
 
+def _origin(entity: LightEntity) -> str:
+    """Describe what asked for a change, so logs show who turned a light off."""
+    context = entity._context
+    if context is None:
+        return "no context"
+    parts = [f"context {context.id}"]
+    if context.user_id:
+        parts.append(f"user {context.user_id}")
+    if context.parent_id:
+        parts.append(f"from {context.parent_id}")
+    return ", ".join(parts)
+
+
 def _range(
     device: GoveeDevice, instance: str, default: tuple[int, int]
 ) -> tuple[int, int]:
@@ -184,10 +197,17 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
         return None
 
     async def _control(self, cap_type: str, instance: str, value: Any) -> None:
+        _LOGGER.debug("Sending %s=%s to %s", instance, value, self._device.name)
         try:
             await self.coordinator.api.control(self._device, cap_type, instance, value)
         except GoveeRateLimitError:
             # Back off once; Govee's limit is a short burst window.
+            _LOGGER.debug(
+                "Govee rate-limited %s=%s for %s, retrying",
+                instance,
+                value,
+                self._device.name,
+            )
             await asyncio.sleep(RATE_LIMIT_RETRY_DELAY)
             await self.coordinator.api.control(self._device, cap_type, instance, value)
 
@@ -210,6 +230,9 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on, optionally setting color or brightness."""
+        _LOGGER.debug(
+            "Turn on %s with %s (%s)", self._device.name, kwargs, _origin(self)
+        )
         commands: list[tuple[str, str, Any]] = []
 
         # A plain "turn on" always sends power, since the cached state can be
@@ -264,6 +287,7 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
+        _LOGGER.debug("Turn off %s (%s)", self._device.name, _origin(self))
         self.coordinator.apply_local_state(self._device.device_id, {INST_POWER: 0})
         await self._send(CAP_ON_OFF, INST_POWER, 0)
 
@@ -320,10 +344,12 @@ class GoveeAllLights(CoordinatorEntity[GoveeCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn every member on with the same settings."""
+        _LOGGER.debug("Turn on all lights with %s (%s)", kwargs, _origin(self))
         await self._run(m.async_turn_on(**kwargs) for m in self._members)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn every member off."""
+        _LOGGER.debug("Turn off all lights (%s)", _origin(self))
         await self._run(m.async_turn_off(**kwargs) for m in self._members)
 
     async def _run(self, calls) -> None:

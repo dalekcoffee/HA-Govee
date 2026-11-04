@@ -52,6 +52,8 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.api = api
         self.devices = {device.device_id: device for device in devices}
         self.options_snapshot: dict[str, Any] = {}
+        # Light entities, set by the light platform.
+        self.lights: list[Any] = []
         # device_id -> (expires at, values we sent)
         self._held: dict[str, tuple[float, dict[str, Any]]] = {}
 

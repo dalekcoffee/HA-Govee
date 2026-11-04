@@ -1,12 +1,17 @@
 {
   "domain": "govee_cloud",
   "name": "Govee Cloud",
-  "codeowners": ["@dalekcoffee"],
+  "after_dependencies": [
+    "conversation"
+  ],
+  "codeowners": [
+    "@dalekcoffee"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/dalekcoffee/HA-Govee",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/dalekcoffee/HA-Govee/issues",
   "requirements": [],
-  "version": "0.1.4"
+  "version": "0.2.0"
 }

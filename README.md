@@ -33,6 +33,7 @@ You won't get update notifications this way.
 ## Good to know
 
 - **What it controls:** on/off, brightness, color and color temperature.
+- **Dark colours:** a bulb can't show "dark", so dark colours become a lower brightness instead. Earthy colours like brown are also warmed up, so "brown" comes out as the same warm orange Google Home uses rather than a pinky red. If you also ask for a brightness, yours wins.
 - **Updates:** HA checks each light once a minute, so changes made in the Govee app can take up to a minute to show in HA.
 - **Lights with LAN Control:** keep using the built-in **Govee lights local** integration for those, and leave them unticked here.
 - **Internet:** it needs internet access and Govee's cloud to be up.

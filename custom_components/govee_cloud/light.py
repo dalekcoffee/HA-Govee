@@ -32,6 +32,7 @@ from .const import (
     INST_POWER,
     INST_RGB,
 )
+from .colors import adapt_rgb
 from .coordinator import GoveeConfigEntry, GoveeCoordinator
 from .throttle import CommandThrottle
 
@@ -190,6 +191,8 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on, optionally setting color or brightness."""
+        commands: list[tuple[str, str, Any]] = []
+
         # A plain "turn on" always sends power, since the cached state can be
         # up to a minute old. When only changing color or brightness on a
         # light we believe is on, skip it to halve the requests.
@@ -199,38 +202,48 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
             ATTR_BRIGHTNESS,
         } & kwargs.keys()
         if not changes or not self.is_on:
-            await self._send(CAP_ON_OFF, INST_POWER, 1)
-        sent: dict[str, Any] = {INST_POWER: 1}
+            commands.append((CAP_ON_OFF, INST_POWER, 1))
+        shown: dict[str, Any] = {INST_POWER: 1}
 
+        color_brightness: int | None = None
         if ATTR_RGB_COLOR in kwargs:
-            red, green, blue = kwargs[ATTR_RGB_COLOR]
+            # Dark colours (like brown) become a full-intensity hue plus a
+            # lower brightness, which is how they actually look on a bulb.
+            (red, green, blue), color_brightness = adapt_rgb(
+                tuple(kwargs[ATTR_RGB_COLOR])
+            )
             value = (red << 16) | (green << 8) | blue
-            if (sent_rgb := await self._send(CAP_COLOR, INST_RGB, value)) is not None:
-                sent[INST_RGB] = sent_rgb
-                sent[INST_COLOR_TEMP] = 0
+            commands.append((CAP_COLOR, INST_RGB, value))
+            shown[INST_RGB] = value
+            shown[INST_COLOR_TEMP] = 0
         elif ATTR_COLOR_TEMP_KELVIN in kwargs:
             low = self._attr_min_color_temp_kelvin
             high = self._attr_max_color_temp_kelvin
             kelvin = max(low, min(high, int(kwargs[ATTR_COLOR_TEMP_KELVIN])))
-            if (
-                sent_kelvin := await self._send(CAP_COLOR, INST_COLOR_TEMP, kelvin)
-            ) is not None:
-                sent[INST_COLOR_TEMP] = sent_kelvin
+            commands.append((CAP_COLOR, INST_COLOR_TEMP, kelvin))
+            shown[INST_COLOR_TEMP] = kelvin
 
-        if ATTR_BRIGHTNESS in kwargs and self._device.has(INST_BRIGHTNESS):
+        level: float | None = None
+        if ATTR_BRIGHTNESS in kwargs:
+            level = brightness_to_value(self._brightness_range, kwargs[ATTR_BRIGHTNESS])
+        elif color_brightness is not None:
+            # Brightness implied by a dark colour, as a 0-100 percentage.
             low, high = self._brightness_range
-            value = round(
-                brightness_to_value(self._brightness_range, kwargs[ATTR_BRIGHTNESS])
-            )
-            value = max(low, min(high, value))
-            if (
-                sent_level := await self._send(CAP_RANGE, INST_BRIGHTNESS, value)
-            ) is not None:
-                sent[INST_BRIGHTNESS] = sent_level
+            level = low + (high - low) * (color_brightness - 1) / 99
+        if level is not None and self._device.has(INST_BRIGHTNESS):
+            low, high = self._brightness_range
+            value = max(low, min(high, round(level)))
+            commands.append((CAP_RANGE, INST_BRIGHTNESS, value))
+            shown[INST_BRIGHTNESS] = value
 
-        self.coordinator.apply_local_state(self._device.device_id, sent)
+        # Show the requested values right away, in request order, so the
+        # newest request always wins in the UI even if commands to the bulb
+        # finish out of order or are merged.
+        self.coordinator.apply_local_state(self._device.device_id, shown)
+        for cap_type, instance, value in commands:
+            await self._send(cap_type, instance, value)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        await self._send(CAP_ON_OFF, INST_POWER, 0)
         self.coordinator.apply_local_state(self._device.device_id, {INST_POWER: 0})
+        await self._send(CAP_ON_OFF, INST_POWER, 0)

@@ -1,5 +1,6 @@
 """Light platform tests."""
 
+import asyncio
 import json
 
 from homeassistant.components.light import (
@@ -157,3 +158,74 @@ async def test_rate_limited_command_is_retried(hass, aioclient_mock, monkeypatch
     )
     assert calls == [("powerSwitch", 0), ("powerSwitch", 0)]
     assert hass.states.get(ENTITY).state == STATE_OFF
+
+
+async def test_stale_poll_does_not_undo_new_color(hass, aioclient_mock):
+    entry = await _setup(hass, aioclient_mock)
+    await hass.services.async_call(
+        LIGHT_DOMAIN,
+        "turn_on",
+        {ATTR_ENTITY_ID: ENTITY, ATTR_RGB_COLOR: (0, 255, 0)},
+        blocking=True,
+    )
+    # Govee still reports the old red color on the next poll.
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(ENTITY).attributes[ATTR_RGB_COLOR] == (0, 255, 0)
+
+
+async def test_newest_drag_value_wins(hass, aioclient_mock, monkeypatch):
+    entry = await _setup(hass, aioclient_mock)
+    api = entry.runtime_data.api
+    release = asyncio.Event()
+    sent = []
+
+    async def slow_control(device, cap_type, instance, value):
+        sent.append(value)
+        if len(sent) == 1:
+            await release.wait()
+
+    monkeypatch.setattr(api, "control", slow_control)
+    calls = [
+        hass.async_create_task(
+            hass.services.async_call(
+                LIGHT_DOMAIN,
+                "turn_on",
+                {ATTR_ENTITY_ID: ENTITY, ATTR_RGB_COLOR: rgb},
+                blocking=True,
+            )
+        )
+        for rgb in ((255, 0, 0), (0, 255, 0), (0, 0, 255))
+    ]
+    await asyncio.sleep(0.05)
+    release.set()
+    await asyncio.gather(*calls)
+    await hass.async_block_till_done()
+    # The first value went out, the middle one was merged away, and the
+    # picker stays on the last value.
+    assert sent == [0xFF0000, 0x0000FF]
+    assert hass.states.get(ENTITY).attributes[ATTR_RGB_COLOR] == (0, 0, 255)
+
+
+async def test_brown_sends_google_orange(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock)
+    await hass.services.async_call(
+        LIGHT_DOMAIN,
+        "turn_on",
+        {ATTR_ENTITY_ID: ENTITY, "color_name": "brown"},
+        blocking=True,
+    )
+    assert _controls(aioclient_mock) == [
+        ("colorRgb", (255 << 16) | (120 << 8) | 20),
+    ]
+
+
+async def test_explicit_brightness_wins_over_color_darkness(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock)
+    await hass.services.async_call(
+        LIGHT_DOMAIN,
+        "turn_on",
+        {ATTR_ENTITY_ID: ENTITY, "color_name": "brown", ATTR_BRIGHTNESS: 255},
+        blocking=True,
+    )
+    assert _controls(aioclient_mock)[-1] == ("brightness", 100)

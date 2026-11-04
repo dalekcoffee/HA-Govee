@@ -6,7 +6,9 @@ requested in the Govee Home app. Docs: https://developer.govee.com/
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
+import time
 from typing import Any
 import uuid
 
@@ -15,6 +17,12 @@ import aiohttp
 from .const import API_BASE_URL, CAP_ON_OFF, INST_POWER, TYPE_LIGHT
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+# Govee allows about 12 control commands per second for a whole account, on
+# top of the per-device limit. Setting every light at once easily goes over
+# that, so commands from all lights share one pace, kept under the limit.
+# Read at runtime so tests can turn it off.
+ACCOUNT_MIN_INTERVAL = 0.125
 
 
 class GoveeApiError(Exception):
@@ -66,6 +74,15 @@ class GoveeApi:
         """Initialize the client."""
         self._session = session
         self._api_key = api_key
+        self._control_lock = asyncio.Lock()
+        self._next_control = 0.0
+
+    async def _wait_for_control_slot(self) -> None:
+        async with self._control_lock:
+            delay = self._next_control - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            self._next_control = time.monotonic() + ACCOUNT_MIN_INTERVAL
 
     async def _request(
         self, method: str, path: str, payload: dict[str, Any] | None = None
@@ -159,6 +176,7 @@ class GoveeApi:
         self, device: GoveeDevice, cap_type: str, instance: str, value: Any
     ) -> None:
         """Send one control command."""
+        await self._wait_for_control_slot()
         await self._request(
             "POST",
             "/router/api/v1/device/control",

@@ -60,7 +60,7 @@ With 2 or more lights, the integration also adds:
 ## Development
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
+python3.14 -m venv .venv && . .venv/bin/activate
 pip install -r requirements_test.txt
 pytest
 ```

@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-import voluptuous as vol
-
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -19,6 +17,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import GoveeApi, GoveeApiError, GoveeAuthError, GoveeDevice
+from .compat import vol
 from .const import CONF_DEVICES, DOMAIN
 
 

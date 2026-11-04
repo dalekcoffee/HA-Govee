@@ -190,6 +190,8 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on, optionally setting color or brightness."""
+        commands: list[tuple[str, str, Any]] = []
+
         # A plain "turn on" always sends power, since the cached state can be
         # up to a minute old. When only changing color or brightness on a
         # light we believe is on, skip it to halve the requests.
@@ -199,23 +201,21 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
             ATTR_BRIGHTNESS,
         } & kwargs.keys()
         if not changes or not self.is_on:
-            await self._send(CAP_ON_OFF, INST_POWER, 1)
-        sent: dict[str, Any] = {INST_POWER: 1}
+            commands.append((CAP_ON_OFF, INST_POWER, 1))
+        shown: dict[str, Any] = {INST_POWER: 1}
 
         if ATTR_RGB_COLOR in kwargs:
             red, green, blue = kwargs[ATTR_RGB_COLOR]
             value = (red << 16) | (green << 8) | blue
-            if (sent_rgb := await self._send(CAP_COLOR, INST_RGB, value)) is not None:
-                sent[INST_RGB] = sent_rgb
-                sent[INST_COLOR_TEMP] = 0
+            commands.append((CAP_COLOR, INST_RGB, value))
+            shown[INST_RGB] = value
+            shown[INST_COLOR_TEMP] = 0
         elif ATTR_COLOR_TEMP_KELVIN in kwargs:
             low = self._attr_min_color_temp_kelvin
             high = self._attr_max_color_temp_kelvin
             kelvin = max(low, min(high, int(kwargs[ATTR_COLOR_TEMP_KELVIN])))
-            if (
-                sent_kelvin := await self._send(CAP_COLOR, INST_COLOR_TEMP, kelvin)
-            ) is not None:
-                sent[INST_COLOR_TEMP] = sent_kelvin
+            commands.append((CAP_COLOR, INST_COLOR_TEMP, kelvin))
+            shown[INST_COLOR_TEMP] = kelvin
 
         if ATTR_BRIGHTNESS in kwargs and self._device.has(INST_BRIGHTNESS):
             low, high = self._brightness_range
@@ -223,14 +223,17 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
                 brightness_to_value(self._brightness_range, kwargs[ATTR_BRIGHTNESS])
             )
             value = max(low, min(high, value))
-            if (
-                sent_level := await self._send(CAP_RANGE, INST_BRIGHTNESS, value)
-            ) is not None:
-                sent[INST_BRIGHTNESS] = sent_level
+            commands.append((CAP_RANGE, INST_BRIGHTNESS, value))
+            shown[INST_BRIGHTNESS] = value
 
-        self.coordinator.apply_local_state(self._device.device_id, sent)
+        # Show the requested values right away, in request order, so the
+        # newest request always wins in the UI even if commands to the bulb
+        # finish out of order or are merged.
+        self.coordinator.apply_local_state(self._device.device_id, shown)
+        for cap_type, instance, value in commands:
+            await self._send(cap_type, instance, value)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        await self._send(CAP_ON_OFF, INST_POWER, 0)
         self.coordinator.apply_local_state(self._device.device_id, {INST_POWER: 0})
+        await self._send(CAP_ON_OFF, INST_POWER, 0)

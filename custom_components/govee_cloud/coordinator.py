@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -20,6 +21,10 @@ from .api import (
 from .const import DOMAIN, SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
+
+# Govee's cloud can report the old state for several seconds after a command.
+# Keep showing the values we sent for this long so polls don't undo them.
+OPTIMISTIC_HOLD_SECONDS = 15.0
 
 type GoveeConfigEntry = ConfigEntry[GoveeCoordinator]
 
@@ -47,6 +52,8 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.api = api
         self.devices = {device.device_id: device for device in devices}
         self.options_snapshot: dict[str, Any] = {}
+        # device_id -> (expires at, values we sent)
+        self._held: dict[str, tuple[float, dict[str, Any]]] = {}
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         data: dict[str, dict[str, Any]] = {}
@@ -66,6 +73,12 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 # a poll succeeds again.
         if errors and not data:
             raise UpdateFailed("; ".join(errors))
+        now = time.monotonic()
+        for device_id, (expires, values) in list(self._held.items()):
+            if expires < now:
+                del self._held[device_id]
+            elif device_id in data:
+                data[device_id].update(values)
         for error in errors:
             _LOGGER.debug("Could not update %s", error)
         return data
@@ -75,5 +88,8 @@ class GoveeCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # Skip devices whose last poll failed so they stay unavailable.
         if self.data is None or device_id not in self.data:
             return
+        _, held = self._held.get(device_id, (0.0, {}))
+        held.update(values)
+        self._held[device_id] = (time.monotonic() + OPTIMISTIC_HOLD_SECONDS, held)
         self.data[device_id].update(values)
         self.async_update_listeners()

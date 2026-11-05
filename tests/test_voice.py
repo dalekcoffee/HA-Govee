@@ -167,3 +167,15 @@ async def test_all_lights_colour_never_turns_off(hass, aioclient_mock, colour):
     )
     await hass.async_block_till_done()
     assert 0 not in _power_values(aioclient_mock, start)
+
+
+async def test_white_is_full_brightness(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock)
+    start = len(aioclient_mock.mock_calls)
+    await conversation.async_converse(
+        hass, "set all lights to white", None, Context(), language="en"
+    )
+    await hass.async_block_till_done()
+    sent = _controls(aioclient_mock, start)
+    assert (DEVICE_ID, "colorTemperatureK") in sent
+    assert (DEVICE_ID, "brightness") in sent

@@ -35,7 +35,7 @@ from .const import (
 )
 from .colors import adapt_rgb
 from .coordinator import GoveeConfigEntry, GoveeCoordinator
-from .palette import Preset
+from .palette import WHITE_KELVIN, Preset, is_plain_white
 from .throttle import CommandThrottle
 
 _LOGGER = logging.getLogger(__name__)
@@ -234,6 +234,18 @@ class GoveeLight(CoordinatorEntity[GoveeCoordinator], LightEntity):
             "Turn on %s with %s (%s)", self._device.name, kwargs, _origin(self)
         )
         commands: list[tuple[str, str, Any]] = []
+
+        # RGB white looks dim and bluish on these bulbs. Use the bulb's white
+        # LEDs at full brightness instead, like Google Home does.
+        rgb = kwargs.get(ATTR_RGB_COLOR)
+        if (
+            rgb is not None
+            and is_plain_white(tuple(rgb))
+            and ColorMode.COLOR_TEMP in (self._attr_supported_color_modes or set())
+        ):
+            kwargs = {k: v for k, v in kwargs.items() if k != ATTR_RGB_COLOR}
+            kwargs[ATTR_COLOR_TEMP_KELVIN] = WHITE_KELVIN
+            kwargs.setdefault(ATTR_BRIGHTNESS, 255)
 
         # A plain "turn on" always sends power, since the cached state can be
         # up to a minute old. When only changing color or brightness on a

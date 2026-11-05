@@ -257,3 +257,35 @@ async def test_govee_app_group_is_skipped(hass, aioclient_mock):
 
     assert hass.states.get("light.bonfire") is None
     assert dr.async_get(hass).async_get(stale.id) is None
+
+
+async def test_rgb_white_becomes_bright_colour_temperature(hass, aioclient_mock):
+    """HA's "white" (RGB 255,255,255) uses the white LEDs at full brightness."""
+    await _setup(hass, aioclient_mock, power=1, brightness=25)
+    aioclient_mock.mock_calls.clear()
+    await hass.services.async_call(
+        LIGHT_DOMAIN,
+        "turn_on",
+        {ATTR_ENTITY_ID: ENTITY, ATTR_RGB_COLOR: (255, 255, 255)},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    sent = dict(_controls(aioclient_mock))
+    assert "colorRgb" not in sent
+    assert sent["colorTemperatureK"] == 4000
+    assert sent["brightness"] == 100
+
+
+async def test_white_keeps_requested_brightness(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock, power=1, brightness=25)
+    aioclient_mock.mock_calls.clear()
+    await hass.services.async_call(
+        LIGHT_DOMAIN,
+        "turn_on",
+        {ATTR_ENTITY_ID: ENTITY, ATTR_RGB_COLOR: (255, 255, 255), "brightness_pct": 40},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    sent = dict(_controls(aioclient_mock))
+    assert sent["colorTemperatureK"] == 4000
+    assert sent["brightness"] == 40

@@ -25,6 +25,9 @@ class Preset:
     brightness: int | None = None
 
 
+# The white Home Assistant's "white" (RGB 255,255,255) is turned into.
+WHITE_KELVIN = 4000
+
 # Calibrate these against how Google Home renders the same names.
 PRESETS: dict[str, Preset] = {
     # Google Home shows "brown" as a warm orange (hue ~27 degrees) without
@@ -35,12 +38,20 @@ PRESETS: dict[str, Preset] = {
     "amber": Preset(rgb=(255, 126, 0)),
     "candlelight": Preset(kelvin=2000, brightness=30),
     "candle light": Preset(kelvin=2000, brightness=30),
-    "warm white": Preset(kelvin=2700),
-    "soft white": Preset(kelvin=2700),
-    "white": Preset(kelvin=4000),
-    "cool white": Preset(kelvin=5000),
-    "daylight": Preset(kelvin=6500),
+    # Like Google Home, whites are colour temperatures at full brightness,
+    # so they look like a normal light bulb rather than dim RGB white.
+    "warm white": Preset(kelvin=2700, brightness=100),
+    "soft white": Preset(kelvin=2700, brightness=100),
+    "white": Preset(kelvin=WHITE_KELVIN, brightness=100),
+    "cool white": Preset(kelvin=5000, brightness=100),
+    "daylight": Preset(kelvin=6500, brightness=100),
 }
+
+
+def is_plain_white(rgb: tuple[int, int, int]) -> bool:
+    """True for RGB white, which Home Assistant sends for "white"."""
+    return min(rgb) >= 240 and max(rgb) - min(rgb) <= 15
+
 
 # Plain colour names that voice commands may handle without asking Claude.
 COMMON_COLORS = [

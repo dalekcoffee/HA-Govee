@@ -18,9 +18,14 @@ from homeassistant.helpers.llm import (
 )
 
 from .const import DOMAIN
-from .voice import INTENT_SET_COLOR
+from .voice import INTENT_SET_COLOR, INTENT_SET_POWER
 
-# Setting a colour again with the same arguments changes nothing more.
+TOOLS = {
+    INTENT_SET_COLOR: "Set Govee light colour",
+    INTENT_SET_POWER: "Turn Govee lights on or off",
+}
+
+# Calling again with the same arguments changes nothing more.
 ANNOTATIONS = ToolAnnotations(idempotent=True, open_world=False)
 
 
@@ -28,7 +33,7 @@ ANNOTATIONS = ToolAnnotations(idempotent=True, open_world=False)
 def async_get_tools(
     hass: HomeAssistant, llm_context: LLMContext, api_id: str
 ) -> LLMTools | None:
-    """Offer the colour tool when any Govee light is exposed to the assistant."""
+    """Offer the Govee tools when any Govee light is exposed to the assistant."""
     if api_id != LLM_API_ASSIST or not llm_context.assistant:
         return None
 
@@ -41,20 +46,15 @@ def async_get_tools(
     ):
         return None
 
-    handler = next(
-        (h for h in intent.async_get(hass) if h.intent_type == INTENT_SET_COLOR),
-        None,
-    )
-    if handler is None:
-        return None
-    return LLMTools(
-        tools=[
-            IntentTool(
-                f"{DOMAIN}__{INTENT_SET_COLOR}",
-                handler,
-                title="Set Govee light colour",
-                integration=DOMAIN,
-                annotations=ANNOTATIONS,
-            )
-        ]
-    )
+    tools = [
+        IntentTool(
+            f"{DOMAIN}__{handler.intent_type}",
+            handler,
+            title=TOOLS[handler.intent_type],
+            integration=DOMAIN,
+            annotations=ANNOTATIONS,
+        )
+        for handler in intent.async_get(hass)
+        if handler.intent_type in TOOLS
+    ]
+    return LLMTools(tools=tools) if tools else None

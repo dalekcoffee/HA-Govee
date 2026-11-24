@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 INTENT_SET_COLOR = "GoveeSetLightColor"
+INTENT_SET_POWER = "GoveeSetLightPower"
 
 # Area values that mean "every light in the house". Small models often pass
 # the name of the "All lights" entity or "house" instead of leaving it empty.
@@ -135,7 +136,7 @@ async def apply_preset(
     failed: list[GoveeLight] = []
     for light, result in zip(lights, results, strict=True):
         if isinstance(result, Exception):
-            _LOGGER.warning("%s did not respond: %s", light.name, result)
+            _LOGGER.warning("%s did not respond: %s", light.entity_id, result)
             failed.append(light)
         else:
             done.append(light)
@@ -146,15 +147,25 @@ def _summary(done: list[GoveeLight], failed: list[GoveeLight], color: str) -> st
     count = len(done)
     text = f"Set {count} light{'s' if count != 1 else ''} to {color}."
     if failed:
-        names = ", ".join(str(light.name) for light in failed)
+        names = ", ".join(_display_name(light) for light in failed)
         text += f" These did not respond: {names}."
     return text
+
+
+def _display_name(light: GoveeLight) -> str:
+    if (
+        light.hass
+        and light.entity_id
+        and (st := light.hass.states.get(light.entity_id))
+    ):
+        return str(st.name)
+    return str(light.entity_id)
 
 
 def _target(light: GoveeLight) -> intent.IntentResponseTarget:
     return intent.IntentResponseTarget(
         type=intent.IntentResponseTargetType.ENTITY,
-        name=str(light.name),
+        name=_display_name(light),
         id=light.entity_id,
     )
 
@@ -205,6 +216,79 @@ class SetColorIntent(intent.IntentHandler):
             failed_results=[_target(light) for light in failed],
         )
         response.async_set_speech(_summary(done, failed, color))
+        return response
+
+
+async def _run_all(lights: list[GoveeLight], on: bool):
+    results = await asyncio.gather(
+        *(light.async_turn_on() if on else light.async_turn_off() for light in lights),
+        return_exceptions=True,
+    )
+    done: list[GoveeLight] = []
+    failed: list[GoveeLight] = []
+    for light, result in zip(lights, results, strict=True):
+        if isinstance(result, Exception):
+            _LOGGER.warning("%s did not respond: %s", light.entity_id, result)
+            failed.append(light)
+        else:
+            done.append(light)
+    return done, failed
+
+
+class SetPowerIntent(intent.IntentHandler):
+    """Turn Govee lights on or off, including every light at once."""
+
+    intent_type = INTENT_SET_POWER
+    platforms: ClassVar[set[str]] = {"light"}
+    description = (
+        "Turn Govee lights on or off. Use this when the user says all lights, "
+        "every light or the whole house: leave area out. For one room, pass "
+        "the room name, such as kitchen. Set state to on or off. Does not "
+        "change colour."
+    )
+    slot_schema: ClassVar[dict] = {
+        vol.Required("state"): cv.string,
+        vol.Optional("area"): cv.string,
+    }
+
+    async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
+        """Handle the intent."""
+        slots = self.async_validate_slots(intent_obj.slots)
+        state = str(slots["state"]["value"]).strip().lower()
+        if state not in ("on", "off"):
+            raise intent.IntentHandleError("state must be on or off")
+        on = state == "on"
+        area = slots.get("area", {}).get("value")
+        hass = intent_obj.hass
+        _LOGGER.debug("Power intent: on=%s area=%r", on, area)
+        lights = find_lights(hass, area)
+        if not lights:
+            known = ", ".join(_known_areas(hass)) or "none"
+            raise intent.IntentHandleError(
+                f"No Govee lights in an area called {area}. Areas with Govee "
+                f"lights: {known}. Leave area out for every light."
+            )
+        done, failed = await _run_all(lights, on)
+        if not done:
+            raise intent.IntentHandleError(
+                f"None of the {len(lights)} Govee lights responded."
+            )
+        response = intent_obj.create_response()
+        response.async_set_results(
+            success_results=[_target(light) for light in done],
+            failed_results=[_target(light) for light in failed],
+        )
+        count = len(done)
+        speech = (
+            f"Turned {'on' if on else 'off'} {count} light{'s' if count != 1 else ''}."
+        )
+        if failed:
+            speech += (
+                " These did not respond: "
+                + ", ".join(_display_name(light) for light in failed)
+                + "."
+            )
+        response.async_set_speech(speech)
         return response
 
 
@@ -265,6 +349,7 @@ def async_setup_voice(hass: HomeAssistant, local_sentences: bool) -> CALLBACK_TY
         return lambda: _release(hass)
 
     intent.async_register(hass, SetColorIntent())
+    intent.async_register(hass, SetPowerIntent())
     unregister_trigger: CALLBACK_TYPE | None = None
     if local_sentences:
         try:
@@ -308,4 +393,5 @@ def _release(hass: HomeAssistant) -> None:
     if data["unregister"] is not None:
         data["unregister"]()
     intent.async_remove(hass, INTENT_SET_COLOR)
+    intent.async_remove(hass, INTENT_SET_POWER)
     hass.data.pop(DATA_VOICE)

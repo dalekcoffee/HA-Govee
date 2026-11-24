@@ -44,12 +44,13 @@ With 2 or more lights, the integration also adds:
 
 - **An "All lights" entity.** It controls every selected light at once.
 - **Colour names that work like Google Home.** Names such as *dark brown*, *brown*, *candlelight*, *warm white* and *daylight* each come with a sensible colour and brightness.
-- **Commands that run locally, without your AI agent.** HA handles these on its own, with no LLM tokens used:
+- **A colour tool for your AI agent.** Agents like Claude or a local Ollama model can set every light, or one room, to any of these colour names.
+- **Optional commands that skip the AI agent.** Turn on **Handle colour commands without the AI agent** under **Configure**, and HA handles these instantly with no LLM involved:
   - "set all lights to dark brown"
   - "make every light warm white"
   - "set the kitchen lights to candlelight"
 
-  To use these, turn on **Prefer handling commands locally** in your voice assistant's settings. Any other request still goes to your agent, which can use the same colour names.
+  HA checks these before any agent, even with **Prefer handling commands locally** off. Leave the option off if you want your agent to handle every command.
 
 ## Privacy
 

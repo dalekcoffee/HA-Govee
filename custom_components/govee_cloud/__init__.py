@@ -9,7 +9,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import GoveeApi, GoveeApiError, GoveeAuthError
-from .const import CONF_DEVICES, DOMAIN
+from .const import CONF_DEVICES, CONF_LOCAL_SENTENCES, DOMAIN
 from .coordinator import GoveeConfigEntry, GoveeCoordinator
 from .voice import async_setup_voice
 
@@ -51,7 +51,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoveeConfigEntry) -> boo
 
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(async_setup_voice(hass))
+    entry.async_on_unload(
+        async_setup_voice(hass, entry.options.get(CONF_LOCAL_SENTENCES, False))
+    )
     return True
 
 

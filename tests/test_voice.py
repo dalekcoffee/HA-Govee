@@ -16,7 +16,11 @@ from homeassistant.helpers import (
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.govee_cloud.const import CONF_DEVICES, DOMAIN
+from custom_components.govee_cloud.const import (
+    CONF_DEVICES,
+    CONF_LOCAL_SENTENCES,
+    DOMAIN,
+)
 
 from .common import API_KEY, BASE, DEVICE_ID, DEVICES, state
 
@@ -32,7 +36,7 @@ def _two_lights():
     return devices
 
 
-async def _setup(hass, aioclient_mock):
+async def _setup(hass, aioclient_mock, local_sentences=True):
     await async_setup_component(hass, "homeassistant", {})
     await async_setup_component(hass, "conversation", {})
     aioclient_mock.get(f"{BASE}/user/devices", json=_two_lights())
@@ -41,6 +45,10 @@ async def _setup(hass, aioclient_mock):
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_API_KEY: API_KEY, CONF_DEVICES: [DEVICE_ID, DEVICE_2]},
+        options={
+            CONF_DEVICES: [DEVICE_ID, DEVICE_2],
+            CONF_LOCAL_SENTENCES: local_sentences,
+        },
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -111,7 +119,7 @@ async def test_local_sentence(hass, aioclient_mock):
     result = await conversation.async_converse(
         hass, "set all lights to dark brown", None, Context(), language="en"
     )
-    assert result.response.speech["plain"]["speech"] == "Done"
+    assert result.response.speech["plain"]["speech"] == "Set 2 lights to dark brown."
     assert {d for d, _ in _controls(aioclient_mock, start)} == {DEVICE_ID, DEVICE_2}
 
 
@@ -179,3 +187,62 @@ async def test_white_is_full_brightness(hass, aioclient_mock):
     sent = _controls(aioclient_mock, start)
     assert (DEVICE_ID, "colorTemperatureK") in sent
     assert (DEVICE_ID, "brightness") in sent
+
+
+async def test_local_sentences_off_by_default(hass, aioclient_mock):
+    """Without the option, colour commands are left to the conversation agent."""
+    await _setup(hass, aioclient_mock, local_sentences=False)
+    start = len(aioclient_mock.mock_calls)
+    await conversation.async_converse(
+        hass, "set all lights to red", None, Context(), language="en"
+    )
+    await hass.async_block_till_done()
+    assert _controls(aioclient_mock, start) == []
+
+
+@pytest.mark.parametrize(
+    "text", ["Turn all lights red.", "Set all the lights to blue!"]
+)
+async def test_local_sentence_with_punctuation(hass, aioclient_mock, text):
+    await _setup(hass, aioclient_mock)
+    start = len(aioclient_mock.mock_calls)
+    result = await conversation.async_converse(
+        hass, text, None, Context(), language="en"
+    )
+    await hass.async_block_till_done()
+    assert {d for d, _ in _controls(aioclient_mock, start)} == {DEVICE_ID, DEVICE_2}
+    assert result.response.speech["plain"]["speech"].startswith("Set 2 lights")
+
+
+@pytest.mark.parametrize(
+    "area", ["All lights", "all the lights", "the whole house", "Home", ""]
+)
+async def test_intent_all_lights_area_means_every_light(hass, aioclient_mock, area):
+    await _setup(hass, aioclient_mock, local_sentences=False)
+    start = len(aioclient_mock.mock_calls)
+    response = await intent.async_handle(
+        hass,
+        "test",
+        "GoveeSetLightColor",
+        {"color": {"value": "blue"}, "area": {"value": area}},
+    )
+    await hass.async_block_till_done()
+    assert {d for d, _ in _controls(aioclient_mock, start)} == {DEVICE_ID, DEVICE_2}
+    assert response.speech["plain"]["speech"] == "Set 2 lights to blue."
+    assert {t.id for t in response.success_results} == {
+        "light.bedroom_bulb",
+        "light.kitchen_bulb",
+    }
+
+
+async def test_intent_unknown_area_lists_known_areas(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock, local_sentences=False)
+    kitchen = ar.async_get(hass).async_create("Kitchen")
+    _put_in_area(hass, "light.kitchen_bulb", kitchen.id)
+    with pytest.raises(intent.IntentHandleError, match="Kitchen"):
+        await intent.async_handle(
+            hass,
+            "test",
+            "GoveeSetLightColor",
+            {"color": {"value": "blue"}, "area": {"value": "garage"}},
+        )

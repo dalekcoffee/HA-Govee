@@ -37,9 +37,13 @@
   "options": {
     "step": {
       "init": {
-        "title": "Choose lights",
+        "title": "Govee Cloud options",
         "data": {
-          "devices": "Lights"
+          "devices": "Lights",
+          "local_sentences": "Handle colour commands without the AI agent"
+        },
+        "data_description": {
+          "local_sentences": "Commands like \"set all lights to blue\" run instantly without your AI agent. Home Assistant matches these before any agent, even with \"Prefer handling commands locally\" off, so leave this off if you want your agent to handle every command."
         }
       }
     },

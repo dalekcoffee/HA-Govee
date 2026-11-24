@@ -18,7 +18,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import GoveeApi, GoveeApiError, GoveeAuthError, GoveeDevice
 from .compat import vol
-from .const import CONF_DEVICES, DOMAIN
+from .const import CONF_DEVICES, CONF_LOCAL_SENTENCES, DOMAIN
 
 
 async def _fetch_lights(
@@ -160,7 +160,13 @@ class GoveeCloudOptionsFlow(OptionsFlow):
                 {
                     vol.Required(
                         CONF_DEVICES, default=[d for d in current if d in choices]
-                    ): cv.multi_select(choices)
+                    ): cv.multi_select(choices),
+                    vol.Required(
+                        CONF_LOCAL_SENTENCES,
+                        default=self.config_entry.options.get(
+                            CONF_LOCAL_SENTENCES, False
+                        ),
+                    ): bool,
                 }
             ),
         )

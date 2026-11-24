@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from homeassistant.config_entries import ConfigEntryState
@@ -40,7 +41,27 @@ _LOGGER = logging.getLogger(__name__)
 
 INTENT_SET_COLOR = "GoveeSetLightColor"
 
-ALL_WORDS = {"all", "all the", "every", "everything", "every single"}
+# Area values that mean "every light in the house". Small models often pass
+# the name of the "All lights" entity or "house" instead of leaving it empty.
+ALL_WORDS = {
+    "",
+    "all",
+    "all the",
+    "all lights",
+    "all the lights",
+    "all govee lights",
+    "every",
+    "every light",
+    "every single",
+    "everything",
+    "everywhere",
+    "house",
+    "the house",
+    "whole house",
+    "the whole house",
+    "home",
+    "the home",
+}
 
 DATA_VOICE = f"{DOMAIN}_voice"
 
@@ -74,25 +95,68 @@ def _light_area(hass: HomeAssistant, light: GoveeLight) -> str | None:
     return None
 
 
+def means_all(area: str | None) -> bool:
+    """True when an area value means every light."""
+    return area is None or _plain(area) in ALL_WORDS
+
+
+def _plain(text: str) -> str:
+    return normalize(re.sub(r"[^\w\s-]", " ", text))
+
+
 def find_lights(hass: HomeAssistant, area: str | None) -> list[GoveeLight]:
     """Lights in a named area, or every light when no area is given."""
     lights = _loaded_lights(hass)
-    if area is None or normalize(area) in ALL_WORDS:
+    if means_all(area):
         return lights
     area_ids = _area_ids(hass, normalize(area))
     return [light for light in lights if _light_area(hass, light) in area_ids]
 
 
-async def apply_preset(lights: list[GoveeLight], preset: Preset) -> None:
-    """Set every light to the preset at once (each light paces itself)."""
+def _known_areas(hass: HomeAssistant) -> list[str]:
+    areas = ar.async_get(hass)
+    ids = {_light_area(hass, light) for light in _loaded_lights(hass)} - {None}
+    return sorted(a.name for i in ids if (a := areas.async_get_area(i)))
+
+
+async def apply_preset(
+    lights: list[GoveeLight], preset: Preset
+) -> tuple[list[GoveeLight], list[GoveeLight]]:
+    """Set every light to the preset at once (each light paces itself).
+
+    Returns (lights that took the change, lights that failed).
+    """
     kwargs = preset_kwargs(preset)
     results = await asyncio.gather(
         *(light.async_turn_on(**kwargs) for light in lights),
         return_exceptions=True,
     )
-    for result in results:
+    done: list[GoveeLight] = []
+    failed: list[GoveeLight] = []
+    for light, result in zip(lights, results, strict=True):
         if isinstance(result, Exception):
-            _LOGGER.warning("A Govee light did not respond: %s", result)
+            _LOGGER.warning("%s did not respond: %s", light.name, result)
+            failed.append(light)
+        else:
+            done.append(light)
+    return done, failed
+
+
+def _summary(done: list[GoveeLight], failed: list[GoveeLight], color: str) -> str:
+    count = len(done)
+    text = f"Set {count} light{'s' if count != 1 else ''} to {color}."
+    if failed:
+        names = ", ".join(str(light.name) for light in failed)
+        text += f" These did not respond: {names}."
+    return text
+
+
+def _target(light: GoveeLight) -> intent.IntentResponseTarget:
+    return intent.IntentResponseTarget(
+        type=intent.IntentResponseTargetType.ENTITY,
+        name=str(light.name),
+        id=light.entity_id,
+    )
 
 
 class SetColorIntent(intent.IntentHandler):
@@ -101,10 +165,12 @@ class SetColorIntent(intent.IntentHandler):
     intent_type = INTENT_SET_COLOR
     platforms: ClassVar[set[str]] = {"light"}
     description = (
-        "Sets Govee lights to a named colour or white tone, including names "
-        "like dark brown, brown, warm white or candlelight. Use this for "
-        "colour requests. Leave area empty when the user says all lights or "
-        "every light, to set every light in the house."
+        "Change the colour of Govee lights. Only use this when the user names "
+        "a colour or white tone in their current request, for example red, "
+        "blue, dark brown, warm white or candlelight; pass that exact colour. "
+        "Never use it just to turn lights on or off, or to repeat a colour "
+        "from an earlier request. Leave area out for all lights or the whole "
+        "house; otherwise pass the room name, such as kitchen."
     )
     slot_schema: ClassVar[dict] = {
         vol.Required("color"): cv.string,
@@ -120,12 +186,25 @@ class SetColorIntent(intent.IntentHandler):
         _LOGGER.debug("Colour intent: color=%r area=%r -> %s", color, area, preset)
         if preset is None:
             raise intent.IntentHandleError(f"I don't know the colour {color}")
-        lights = find_lights(intent_obj.hass, area)
+        hass = intent_obj.hass
+        lights = find_lights(hass, area)
         if not lights:
-            raise intent.IntentHandleError(f"No Govee lights found in {area}")
-        await apply_preset(lights, preset)
+            known = ", ".join(_known_areas(hass)) or "none"
+            raise intent.IntentHandleError(
+                f"No Govee lights in an area called {area}. Areas with Govee "
+                f"lights: {known}. Leave area out to set every light."
+            )
+        done, failed = await apply_preset(lights, preset)
+        if not done:
+            raise intent.IntentHandleError(
+                f"None of the {len(lights)} Govee lights responded."
+            )
         response = intent_obj.create_response()
-        response.async_set_speech("Done")
+        response.async_set_results(
+            success_results=[_target(light) for light in done],
+            failed_results=[_target(light) for light in failed],
+        )
+        response.async_set_speech(_summary(done, failed, color))
         return response
 
 
@@ -140,7 +219,7 @@ def _sentences() -> list[str]:
 
 
 def _color_in(text: str) -> str | None:
-    text = f" {normalize(text)} "
+    text = f" {_plain(text)} "
     for name in spoken_names():
         if f" {name} " in text:
             return name
@@ -152,7 +231,8 @@ def _make_sentence_handler(hass: HomeAssistant):
         color = _color_in(user_input.text)
         preset = resolve(color) if color else None
         if preset is None:
-            return None
+            # A matched trigger can't hand the command back to the agent.
+            return "Sorry, I couldn't tell which colour you wanted."
         area_entity = result.entities.get("area")
         area = area_entity.text.strip() if area_entity else None
         _LOGGER.debug(
@@ -165,28 +245,36 @@ def _make_sentence_handler(hass: HomeAssistant):
         lights = find_lights(hass, area)
         if not lights:
             return f"I couldn't find any Govee lights in {area}"
-        await apply_preset(lights, preset)
-        return "Done"
+        done, failed = await apply_preset(lights, preset)
+        if not done:
+            return "None of the Govee lights responded."
+        return _summary(done, failed, color)
 
     return on_sentence
 
 
-def async_setup_voice(hass: HomeAssistant) -> CALLBACK_TYPE:
-    """Register the intent and local sentences. Returns an unregister callback."""
+def async_setup_voice(hass: HomeAssistant, local_sentences: bool) -> CALLBACK_TYPE:
+    """Register the intent, and the local sentences if asked to.
+
+    Local sentences are matched before any conversation agent, even with
+    "Prefer handling commands locally" off, so they are opt-in.
+    Returns an unregister callback.
+    """
     if DATA_VOICE in hass.data:
         hass.data[DATA_VOICE]["users"] += 1
         return lambda: _release(hass)
 
     intent.async_register(hass, SetColorIntent())
     unregister_trigger: CALLBACK_TYPE | None = None
-    try:
-        unregister_trigger = _register_sentences(hass)
-    except Exception:
-        _LOGGER.warning(
-            "Could not register local voice sentences; colour commands will "
-            "still work through your conversation agent",
-            exc_info=True,
-        )
+    if local_sentences:
+        try:
+            unregister_trigger = _register_sentences(hass)
+        except Exception:
+            _LOGGER.warning(
+                "Could not register local voice sentences; colour commands "
+                "will still work through your conversation agent",
+                exc_info=True,
+            )
 
     hass.data[DATA_VOICE] = {"users": 1, "unregister": unregister_trigger}
     return lambda: _release(hass)

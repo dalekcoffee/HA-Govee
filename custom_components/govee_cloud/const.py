@@ -7,6 +7,8 @@ DOMAIN = "govee_cloud"
 API_BASE_URL = "https://openapi.api.govee.com"
 
 CONF_DEVICES = "devices"
+# Handle "set all lights to <colour>" without the conversation agent.
+CONF_LOCAL_SENTENCES = "local_sentences"
 
 # Govee allows 30 state requests per minute per device; one poll a minute
 # per device stays far below that.

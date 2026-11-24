@@ -44,7 +44,7 @@ With 2 or more lights, the integration also adds:
 
 - **An "All lights" entity.** It controls every selected light at once.
 - **Colour names that work like Google Home.** Names such as *dark brown*, *brown*, *candlelight*, *warm white* and *daylight* each come with a sensible colour and brightness.
-- **A colour tool for your AI agent.** Agents like Claude or a local Ollama model can set every light, or one room, to any of these colour names.
+- **Colour and on/off tools for your AI agent.** Agents like Claude or a local Ollama model can turn every light (or one room) on or off, or set it to any of these colour names.
 - **Optional commands that skip the AI agent.** Turn on **Handle colour commands without the AI agent** under **Configure**, and HA handles these instantly with no LLM involved:
   - "set all lights to dark brown"
   - "make every light warm white"

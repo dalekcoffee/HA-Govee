@@ -53,3 +53,29 @@ async def test_colour_tool_hidden_when_nothing_exposed(hass, aioclient_mock):
 
     api = await llm.async_get_api(hass, llm.LLM_API_ASSIST, _context())
     assert TOOL not in {tool.name for tool in api.tools}
+
+
+POWER_TOOL = "govee_cloud__GoveeSetLightPower"
+
+
+@pytest.mark.parametrize("state", ["on", "Off"])
+async def test_power_tool_all_lights(hass, aioclient_mock, state):
+    await _setup(hass, aioclient_mock)
+    assert await async_setup_component(hass, "llm", {})
+    async_expose_entity(hass, "conversation", "light.bedroom_bulb", True)
+
+    api = await llm.async_get_api(hass, llm.LLM_API_ASSIST, _context())
+    assert POWER_TOOL in {tool.name for tool in api.tools}
+
+    start = len(aioclient_mock.mock_calls)
+    result = await api.async_call_tool(
+        llm.ToolInput(
+            tool_name=POWER_TOOL, tool_args={"state": state, "area": "All lights"}
+        )
+    )
+    await hass.async_block_till_done()
+    assert {d for d, _ in _controls(aioclient_mock, start)} == {DEVICE_ID, DEVICE_2}
+    data = result.data
+    assert data["speech"]["plain"]["speech"].endswith("2 lights.")
+    names = {t["name"] for t in data["data"]["success"]}
+    assert names == {"Bedroom bulb", "Kitchen bulb"}
